@@ -15,17 +15,17 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '167474430')
   .split(',')
   .map(x => Number(x.trim()))
 
-// ========= FIX 409 =========
-async function resetTelegram() {
+// ========= RESET TELEGRAM (FIX 409) =========
+(async () => {
   try {
+    console.log('♻️ Reset session Telegram...')
     await axios.get(`https://api.telegram.org/bot${TOKEN}/deleteWebhook`)
     await axios.get(`https://api.telegram.org/bot${TOKEN}/getUpdates?offset=-1`)
-    console.log('✅ Session Telegram dibersihkan')
+    console.log('✅ Session bersih')
   } catch (e) {
-    console.log('Gagal reset session', e.message)
+    console.log('⚠️ Reset gagal:', e.message)
   }
-}
-resetTelegram()
+})()
 
 // ========= BOT =========
 const bot = new TelegramBot(TOKEN, {
@@ -172,6 +172,7 @@ bot.on('callback_query', async q => {
   const chatId = q.message.chat.id
   const data = q.data
 
+  // ===== VALDAT ISI =====
   if(data.startsWith('VALDAT_ISI|')){
     const nama = data.split('|')[1]
     userMode[chatId] = { valdat:true, field:'VALDAT_ISI', nama }
@@ -179,6 +180,60 @@ bot.on('callback_query', async q => {
     return
   }
 
+  // ===== APPROVE =====
+  if(data.startsWith('APPROVE_')){
+    const id=data.split('_')[1]
+    const p=pendingApproval[id]
+    if(!p) return
+
+    try{
+      const colLetter=String.fromCharCode(64+p.col)
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId:SHEET_ID,
+        range:`ODP!${colLetter}${p.row}`,
+        valueInputOption:'RAW',
+        requestBody:{ values:[[p.value]] }
+      })
+
+      await loadSheet()
+
+      bot.sendMessage(chatId,"✅ Update disetujui & data diperbarui")
+
+      bot.sendMessage(p.userChatId,
+`✅ VALDAT DISETUJUI ADMIN
+
+ODP: ${p.nama}
+Field: ${p.field.replace('VALDAT_','')}
+Nilai: ${p.value}`)
+
+      delete pendingApproval[id]
+
+    }catch(err){
+      bot.sendMessage(chatId,"❌ Gagal update sheet")
+    }
+    return
+  }
+
+  // ===== REJECT =====
+  if(data.startsWith('REJECT_')){
+    const id = data.split('_')[1]
+    const p = pendingApproval[id]
+    if(!p) return
+
+    bot.sendMessage(p.userChatId,
+`❌ VALDAT DITOLAK ADMIN
+
+ODP: ${p.nama}
+Field: ${p.field.replace('VALDAT_','')}
+Nilai: ${p.value}`)
+
+    bot.sendMessage(chatId,"❌ Update ditolak")
+    delete pendingApproval[id]
+    return
+  }
+
+  // ===== MENU =====
   if(data==='VALIDASI'){
     userMode[chatId]='VALIDASI'
     bot.sendMessage(chatId,"Ketik nama ODP")
@@ -229,6 +284,7 @@ bot.on('callback_query', async q => {
     }
     return
   }
+
 })
 
 // ========= LOCATION =========
@@ -263,6 +319,53 @@ bot.on('message', async msg=>{
   const chatId = msg.chat.id
   if(msg.text.startsWith('/')) return
 
+  // ===== VALDAT INPUT =====
+  if(userMode[chatId]?.valdat){
+    const {field,nama}=userMode[chatId]
+    await loadSheet()
+
+    const odp = sheetData.find(o=>o.nama===nama)
+    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+
+    const colMap={ GPON:5, SLOT:6, PORT:7, ISI:8 }
+    const col=colMap[field.replace('VALDAT_','')]
+    if(!col) return bot.sendMessage(chatId,"❌ Field tidak valid")
+
+    const approvalId=Date.now()
+
+    pendingApproval[approvalId]={
+      nama, field, value:msg.text, col,
+      row:odp.row,
+      user:msg.from.username || msg.from.first_name,
+      userChatId:chatId
+    }
+
+    ADMIN_IDS.forEach(adminId=>{
+      bot.sendMessage(adminId,
+`📝 PERMINTAAN UPDATE ODP
+
+ODP: ${nama}
+Field: ${field.replace('VALDAT_','')}
+Nilai: ${msg.text}
+User: @${pendingApproval[approvalId].user}`,
+{
+  reply_markup:{
+    inline_keyboard:[
+      [
+        {text:'✅ APPROVE',callback_data:`APPROVE_${approvalId}`},
+        {text:'❌ REJECT',callback_data:`REJECT_${approvalId}`}
+      ]
+    ]
+  }
+})
+    })
+
+    bot.sendMessage(chatId,"⏳ Menunggu approval admin...")
+    userMode[chatId]=null
+    return
+  }
+
+  // ===== VALIDASI =====
   if(userMode[chatId]==='VALIDASI'){
     await loadSheet()
     const found = sheetData.find(o=>o.nama.toLowerCase()===msg.text.toLowerCase())
@@ -272,4 +375,5 @@ bot.on('message', async msg=>{
     await bot.sendLocation(chatId,found.lat,found.lon)
     return
   }
+
 })
