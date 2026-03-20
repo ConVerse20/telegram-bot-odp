@@ -6,33 +6,41 @@ const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 
-console.log('🚀 BOT OPERASIONAL AKTIF')
-console.log('Menunggu perintah user...')
-
-// ===== CONFIG (ENV) =====
+// ===== ENV =====
 const TOKEN = process.env.BOT_TOKEN
 const AUTO_REPORT_CHAT = process.env.AUTO_REPORT_CHAT
 const SHEET_PSB = process.env.SHEET_PSB
 const SHEET_GGN = process.env.SHEET_GGN
-const SHEET_ODP = process.env.ODP_SHEET
+const ODP_SHEET = process.env.ODP_SHEET
 
-if (!TOKEN) {
-  console.log('❌ BOT_TOKEN tidak ditemukan di ENV')
-  process.exit(1)
+// ===== RESET TELEGRAM SESSION (FIX 409) =====
+async function resetTelegram() {
+  try {
+    await axios.get(`https://api.telegram.org/bot${TOKEN}/deleteWebhook`)
+    await axios.get(`https://api.telegram.org/bot${TOKEN}/getUpdates?offset=-1`)
+    console.log('✅ Session Telegram dibersihkan')
+  } catch (e) {
+    console.log('Gagal reset session', e.message)
+  }
 }
 
+resetTelegram()
+
+// ===== START BOT =====
 const bot = new TelegramBot(TOKEN,{polling:true})
 
+console.log('🚀 BOT OPERASIONAL AKTIF')
+console.log('Menunggu perintah user...')
+
+// ===== DATA =====
 let dataPSB=[]
 let dataGGN=[]
-let dataODP=[] // TAMBAHAN
 let userMode={}
 const albums = {};
 const tangibleODP = {};
 
 // ===== LOAD CSV =====
 async function loadCSV(url){
-  if(!url) return []
   const res = await axios.get(url)
   const rows=[]
   return new Promise(resolve=>{
@@ -51,12 +59,12 @@ async function loadCSV(url){
 async function refreshData(){
   dataPSB=await loadCSV(SHEET_PSB)
   dataGGN=await loadCSV(SHEET_GGN)
-  dataODP=await loadCSV(SHEET_ODP) // TAMBAHAN
 }
 
 // ===== FORMAT WAKTU =====
 function getNow(){
   const now = new Date()
+
   const tanggal =
     String(now.getDate()).padStart(2,'0') + '/' +
     String(now.getMonth()+1).padStart(2,'0') + '/' +
@@ -72,7 +80,9 @@ function getNow(){
 // ===== AUTO REPORT =====
 async function autoReportPSB(){
   await refreshData()
+
   const { tanggal, jam } = getNow()
+
   const list = dataPSB.filter(r => r[0] && r[0].includes(tanggal))
   if(list.length === 0) return
 
@@ -84,6 +94,7 @@ async function autoReportPSB(){
 `
 
   list.forEach((r,i)=>{
+
     const statusRaw = (r[13] || '').toLowerCase()
     const detailKendala = (r[16] || '').trim()
 
@@ -150,8 +161,11 @@ bot.onText(/\/start/,msg=>mainMenu(msg.chat.id))
 // ===== CALLBACK =====
 bot.on('callback_query', async q=>{
   bot.answerCallbackQuery(q.id)
+
   const id = q.message.chat.id
   const d  = q.data
+
+  console.log('User klik:', d)
 
   if(d === 'TEST_AUTO'){
     await autoReportPSB()
@@ -165,9 +179,8 @@ bot.on('callback_query', async q=>{
 
   if(d==='TANGIBLE'){
     userMode[id] = 'INPUT_ODP'
-    return bot.sendMessage(id,'🖼️ INPUT TANGGIBLE\n\nSilakan masukkan NAMA ODP terlebih dahulu.')
+    return bot.sendMessage(id,`🖼️ INPUT TANGGIBLE\n\nSilakan masukkan NAMA ODP terlebih dahulu.`)
   }
-
 })
 
 // ===== MESSAGE =====
@@ -178,12 +191,14 @@ bot.on('message', async msg => {
   const id = msg.chat.id
   const mode = userMode[id]
 
-  await refreshData()
-
   if(mode === 'INPUT_ODP'){
     tangibleODP[id] = msg.text.trim();
     userMode[id] = 'TANGIBLE';
-    return bot.sendMessage(id,`📍 Nama ODP: ${tangibleODP[id]}\n\nSekarang kirim 6 foto.`);
+
+    return bot.sendMessage(id,
+`📍 Nama ODP: ${tangibleODP[id]}
+
+Sekarang kirim 6 foto (boleh satu-satu / forward).`)
   }
 })
 
@@ -191,12 +206,20 @@ bot.on('message', async msg => {
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   const mode = userMode[chatId];
+
   if (mode !== "TANGIBLE") return;
 
-  if (!albums[chatId]) albums[chatId] = [];
+  if (!albums[chatId]) {
+    albums[chatId] = [];
+  }
 
   const photo = msg.photo[msg.photo.length - 1];
+
   albums[chatId].push(photo.file_id);
+
+  bot.sendMessage(chatId,
+    `📸 Foto diterima (${albums[chatId].length}/6)`
+  );
 
   if (albums[chatId].length === 6) {
     await processAlbum(chatId, albums[chatId]);
@@ -209,15 +232,18 @@ bot.on("photo", async (msg) => {
 // ===== PROCESS =====
 async function processAlbum(chatId, fileIds) {
   try {
+
     const tempFiles = [];
 
     for (let i = 0; i < fileIds.length; i++) {
       const file = await bot.getFile(fileIds[i]);
       const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+
       const res = await axios.get(url, { responseType: "arraybuffer" });
 
       const filename = `temp_${Date.now()}_${i}.jpg`;
       fs.writeFileSync(filename, res.data);
+
       tempFiles.push(filename);
     }
 
@@ -240,6 +266,7 @@ async function processAlbum(chatId, fileIds) {
 
 // ===== MERGE =====
 async function mergeImages(images) {
+
   const W = 600;
   const H = 600;
   const GAP = 20;
@@ -256,10 +283,12 @@ async function mergeImages(images) {
   const composites = [];
 
   for (let i = 0; i < images.length; i++) {
+
     const img = await sharp(images[i])
       .rotate()
       .resize(W, H, {
         fit: "contain",
+        position: "center",
         background: { r: 255, g: 255, b: 255 }
       })
       .toBuffer();
@@ -269,6 +298,7 @@ async function mergeImages(images) {
       left: (i % 3) * (W + GAP) + GAP,
       top: Math.floor(i / 3) * (H + GAP) + GAP
     });
+
   }
 
   const output = `hasil_${Date.now()}.jpg`;
