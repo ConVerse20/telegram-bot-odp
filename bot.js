@@ -1,62 +1,65 @@
+// ===== ANTI DOUBLE INSTANCE =====
+if (global.botRunning) {
+  console.log("⚠️ Bot sudah jalan, skip instance baru")
+  process.exit(0)
+}
+global.botRunning = true
+
+process.env.NTBA_FIX_350 = 1
+
+// ========= IMPORT =========
 const TelegramBot = require('node-telegram-bot-api')
 const axios = require('axios')
 const csv = require('csv-parser')
 const { Readable } = require('stream')
 const { google } = require('googleapis')
 
-// ========= CONFIG (ENV) =========
+// ========= CONFIG (PAKAI ENV) =========
 const TOKEN = process.env.BOT_TOKEN
 const SHEET_URL = process.env.ODP_SHEET
 const SHEET_ID = process.env.SHEET_ID
-const KEY_FILE = './service-account.json'
-const RADAR_RADIUS = 50
 
+// ========= ADMIN IDS FIX =========
 const rawAdmin = process.env.ADMIN_IDS
-
 let ADMIN_IDS = []
 
 if (!rawAdmin) {
   ADMIN_IDS = [167474430]
 } else {
   ADMIN_IDS = rawAdmin
-    .replace(/"/g, '') // hapus kutip
+    .replace(/"/g, '')
     .split(',')
     .map(x => Number(x.trim()))
     .filter(x => !isNaN(x))
 }
-// ========= RESET TELEGRAM (FIX 409) =========
-(async () => {
-  try {
-    console.log('♻️ Reset session Telegram...')
-    await axios.get(`https://api.telegram.org/bot${TOKEN}/deleteWebhook`)
-    await axios.get(`https://api.telegram.org/bot${TOKEN}/getUpdates?offset=-1`)
-    console.log('✅ Session bersih')
-  } catch (e) {
-    console.log('⚠️ Reset gagal:', e.message)
-  }
-})()
 
-// ========= BOT =========
+// ========= BOT INIT =========
 const bot = new TelegramBot(TOKEN, {
   polling: {
-    interval: 300,
-    autoStart: true,
+    autoStart: false,
     params: { timeout: 10 }
   }
 })
 
+bot.startPolling()
+
+bot.on("polling_error", (err) => {
+  console.log("Polling error:", err.message)
+})
+
 console.log("🚀 BOT ODP PREMIUM AKTIF")
 
+// ========= STATE =========
 let sheetData = []
 let userMode = {}
 let pendingApproval = {}
 
-// ========= GOOGLE SHEETS =========
+// ========= GOOGLE AUTH (FIX RAILWAY) =========
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
-const sheets = google.sheets({version:'v4', auth})
+const sheets = google.sheets({ version: 'v4', auth })
 
 // ========= STATUS ICON =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
@@ -134,7 +137,7 @@ function formatODPWithValdat(o){
 }
 
 function valdatKeyboard(o){
-  return { 
+  return {
     inline_keyboard:[
       [
         {text:'📝 VALDAT GPON', callback_data:`VALDAT_GPON|${o.nama}`},
@@ -176,18 +179,9 @@ bot.onText(/\/start/, msg=>{
 
 // ========= CALLBACK =========
 bot.on('callback_query', async q => {
-
   bot.answerCallbackQuery(q.id)
   const chatId = q.message.chat.id
   const data = q.data
-
-  // ===== VALDAT ISI =====
-  if(data.startsWith('VALDAT_ISI|')){
-    const nama = data.split('|')[1]
-    userMode[chatId] = { valdat:true, field:'VALDAT_ISI', nama }
-    bot.sendMessage(chatId,'Masukkan isi pelanggan / daftar port')
-    return
-  }
 
   // ===== APPROVE =====
   if(data.startsWith('APPROVE_')){
@@ -197,6 +191,8 @@ bot.on('callback_query', async q => {
 
     try{
       const colLetter = String.fromCharCode(64 + Number(p.col))
+
+      console.log("UPDATE:", `ODP!${colLetter}${p.row}`, p.value)
 
       await sheets.spreadsheets.values.update({
         spreadsheetId:SHEET_ID,
@@ -219,108 +215,20 @@ Nilai: ${p.value}`)
       delete pendingApproval[id]
 
     }catch(err){
+      console.log("ERROR GSHEET:", err.response?.data || err.message)
       bot.sendMessage(chatId,"❌ Gagal update sheet")
     }
     return
   }
 
-  // ===== REJECT =====
-  if(data.startsWith('REJECT_')){
-    const id = data.split('_')[1]
-    const p = pendingApproval[id]
-    if(!p) return
-
-    bot.sendMessage(p.userChatId,
-`❌ VALDAT DITOLAK ADMIN
-
-ODP: ${p.nama}
-Field: ${p.field.replace('VALDAT_','')}
-Nilai: ${p.value}`)
-
-    bot.sendMessage(chatId,"❌ Update ditolak")
-    delete pendingApproval[id]
-    return
-  }
-
-  // ===== MENU =====
+  // ===== VALIDASI =====
   if(data==='VALIDASI'){
     userMode[chatId]='VALIDASI'
     bot.sendMessage(chatId,"Ketik nama ODP")
     return
   }
 
-  if(data==='RADAR'){
-    userMode[chatId]='RADAR'
-    bot.sendMessage(chatId,"Share lokasi")
-    return
-  }
-
-  if(data==='STATUS_MENU'){
-    userMode[chatId]='STATUS'
-    bot.sendMessage(chatId,"Pilih status",{
-      reply_markup:{
-        inline_keyboard:[
-          [{text:'🟢 GREEN',callback_data:'STATUS_GREEN'}],
-          [{text:'🟡 YELLOW',callback_data:'STATUS_YELLOW'}],
-          [{text:'🔴 RED',callback_data:'STATUS_RED'}],
-          [{text:'⚫ BLACK',callback_data:'STATUS_BLACK'}]
-        ]
-      }
-    })
-    return
-  }
-
-  if(data.startsWith('STATUS_')){
-    await loadSheet()
-    const s = data.replace('STATUS_','')
-    const filtered = sheetData.filter(o=>o.status===s)
-
-    for(const o of filtered){
-      await bot.sendMessage(chatId, formatODPWithValdat(o), {reply_markup:valdatKeyboard(o)})
-      await bot.sendLocation(chatId,o.lat,o.lon)
-    }
-    return
-  }
-
-  if(data.startsWith('VALDAT_')){
-    const [field, nama] = data.split('|')
-    userMode[chatId] = { valdat:true, field, nama }
-
-    if(field === 'VALDAT_ISI'){
-      bot.sendMessage(chatId,'Masukkan isi pelanggan / daftar port')
-    } else {
-      bot.sendMessage(chatId,'Masukkan nilai baru')
-    }
-    return
-  }
-
 })
-
-// ========= LOCATION =========
-bot.on('location', async msg=>{
-  const chatId = msg.chat.id
-  if(userMode[chatId]!=='RADAR') return
-  await loadSheet()
-  const {latitude, longitude} = msg.location
-  sendRadar(chatId, latitude, longitude)
-})
-
-// ========= RADAR =========
-async function sendRadar(chatId, lat, lon){
-  const nearby = sheetData
-    .map(o=>({...o, jarak: distance(lat,lon,o.lat,o.lon)}))
-    .filter(o=>o.jarak <= RADAR_RADIUS)
-    .sort((a,b)=>a.jarak-b.jarak)
-
-  if(!nearby.length) return bot.sendMessage(chatId,"❌ Tidak ada ODP dalam radius 50m")
-
-  for(let i=0;i<nearby.length;i++){
-    const o = nearby[i]
-    await bot.sendMessage(chatId, `*${i+1}. ODP TERDEKAT (${Math.round(o.jarak)}m)*`, {parse_mode:'Markdown'})
-    await bot.sendMessage(chatId, formatODPWithValdat(o), {reply_markup:valdatKeyboard(o)})
-    await bot.sendLocation(chatId,o.lat,o.lon)
-  }
-}
 
 // ========= MESSAGE =========
 bot.on('message', async msg=>{
@@ -328,7 +236,7 @@ bot.on('message', async msg=>{
   const chatId = msg.chat.id
   if(msg.text.startsWith('/')) return
 
-  // ===== VALDAT INPUT =====
+  // ===== VALDAT =====
   if(userMode[chatId]?.valdat){
     const {field,nama}=userMode[chatId]
     await loadSheet()
@@ -338,21 +246,23 @@ bot.on('message', async msg=>{
 
     const colMap={ GPON:5, SLOT:6, PORT:7, ISI:8 }
     const col=colMap[field.replace('VALDAT_','')]
-    if(!col) return bot.sendMessage(chatId,"❌ Field tidak valid")
 
     const approvalId=Date.now()
 
     pendingApproval[approvalId]={
-      nama, field, value:msg.text, col,
+      nama,
+      field,
+      value:msg.text,
+      col,
       row:odp.row,
       user:msg.from.username || msg.from.first_name,
       userChatId:chatId
     }
 
-    console.log('Kirim ke admin:', ADMIN_IDS)
+    ADMIN_IDS.forEach(adminId=>{
+      console.log("Kirim ke admin:", adminId)
 
-ADMIN_IDS.forEach(adminId=>{
-  bot.sendMessage(adminId,
+      bot.sendMessage(adminId,
 `📝 PERMINTAAN UPDATE ODP
 
 ODP: ${nama}
@@ -375,16 +285,4 @@ User: @${pendingApproval[approvalId].user}`,
     userMode[chatId]=null
     return
   }
-
-  // ===== VALIDASI =====
-  if(userMode[chatId]==='VALIDASI'){
-    await loadSheet()
-    const found = sheetData.find(o=>o.nama.toLowerCase()===msg.text.toLowerCase())
-    if(!found) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
-
-    await bot.sendMessage(chatId, formatODPWithValdat(found), {reply_markup:valdatKeyboard(found)})
-    await bot.sendLocation(chatId,found.lat,found.lon)
-    return
-  }
-
 })
