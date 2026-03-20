@@ -225,6 +225,25 @@ Nilai: ${p.value}`)
   }
 })
 
+// ===== REJECT =====
+if(data.startsWith('REJECT_')){
+  const id = data.split('_')[1]
+  const p = pendingApproval[id]
+  if(!p) return
+
+  bot.sendMessage(chatId,"❌ Update ditolak")
+
+  bot.sendMessage(p.userChatId,
+`❌ VALDAT DITOLAK ADMIN
+
+ODP: ${p.nama}
+Field: ${p.field.replace('VALDAT_','')}
+Nilai: ${p.value}`)
+
+  delete pendingApproval[id]
+  return
+}
+
 // ========= MESSAGE =========
 bot.on('message', async msg=>{
   if(!msg.text) return
