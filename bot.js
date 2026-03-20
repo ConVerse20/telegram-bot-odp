@@ -55,12 +55,14 @@ let userMode = {}
 let pendingApproval = {}
 
 // ========= GOOGLE AUTH (FIX RAILWAY) =========
+const credentials = JSON.parse(
+  Buffer.from(process.env.GOOGLE_CREDS_BASE64, 'base64').toString('utf-8')
+)
+
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+  credentials,
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
-const sheets = google.sheets({ version: 'v4', auth })
-
 // ========= STATUS ICON =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
 
