@@ -53,7 +53,7 @@ let pendingApproval = {}
 
 // ========= GOOGLE SHEETS =========
 const auth = new google.auth.GoogleAuth({
-  keyFile: KEY_FILE,
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
 const sheets = google.sheets({version:'v4', auth})
