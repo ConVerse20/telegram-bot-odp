@@ -11,10 +11,17 @@ const SHEET_ID = process.env.SHEET_ID
 const KEY_FILE = './service-account.json'
 const RADAR_RADIUS = 50
 
-const ADMIN_IDS = String(process.env.ADMIN_IDS || '167474430')
-  .split(',')
-  .map(x => Number(x.trim()))
+const rawAdmin = process.env.ADMIN_IDS
 
+let ADMIN_IDS = []
+
+if (!rawAdmin) {
+  ADMIN_IDS = [167474430]
+} else if (typeof rawAdmin === 'string') {
+  ADMIN_IDS = rawAdmin.split(',').map(x => Number(x.trim()))
+} else {
+  ADMIN_IDS = [Number(rawAdmin)]
+}
 // ========= RESET TELEGRAM (FIX 409) =========
 (async () => {
   try {
