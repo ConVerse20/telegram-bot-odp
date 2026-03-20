@@ -1,4 +1,4 @@
-// ===== ANTI DOUBLE INSTANCE (RAILWAY SAFE) =====
+// ===== ANTI DOUBLE INSTANCE =====
 if (global.botRunning) {
   console.log("⚠️ Bot sudah jalan, skip instance baru")
   process.exit(0)
@@ -19,7 +19,7 @@ const TOKEN = process.env.BOT_TOKEN
 const SHEET_URL = process.env.ODP_SHEET
 const SHEET_ID = process.env.SHEET_ID
 
-// ========= ADMIN IDS =========
+// ========= ADMIN =========
 const rawAdmin = process.env.ADMIN_IDS
 let ADMIN_IDS = []
 
@@ -33,7 +33,7 @@ if (!rawAdmin) {
     .filter(x => !isNaN(x))
 }
 
-// ========= BOT INIT (ANTI 409 FIX) =========
+// ========= BOT INIT =========
 const bot = new TelegramBot(TOKEN, {
   polling: {
     autoStart: false,
@@ -41,7 +41,7 @@ const bot = new TelegramBot(TOKEN, {
   }
 })
 
-// 🔥 WAJIB: reset webhook + polling bersih
+// 🔥 FIX 409 WAJIB
 bot.deleteWebHook().then(() => {
   console.log("✅ Webhook dihapus")
   bot.startPolling()
@@ -53,7 +53,12 @@ bot.on("polling_error", (err) => {
 
 console.log("🚀 BOT ODP PREMIUM AKTIF")
 
-// ========= GOOGLE AUTH (BASE64 FIX) =========
+// ========= STATE =========
+let sheetData = []
+let userMode = {}
+let pendingApproval = {}
+
+// ========= GOOGLE AUTH (BASE64) =========
 const credentials = JSON.parse(
   Buffer.from(process.env.GOOGLE_CREDS_BASE64, 'base64').toString('utf-8')
 )
@@ -63,12 +68,8 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
 
+// 🔥 FIX PENTING (INI YANG KEMARIN ERROR)
 const sheets = google.sheets({ version: 'v4', auth })
-
-// ========= STATE =========
-let sheetData = []
-let userMode = {}
-let pendingApproval = {}
 
 // ========= STATUS ICON =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
@@ -124,6 +125,30 @@ ${STATUS_ICON[o.status] || '⚪'} Status : ${o.status}
 📋 Isi Pelanggan :
 ${o.isi || '-'}
 ━━━━━━━━━━━━━━`
+}
+
+function formatODPWithValdat(o){
+  const incomplete = ['#N/A', undefined, null]
+  let text = formatODP(o)
+  if(incomplete.includes(o.gpon) || incomplete.includes(o.slot) || incomplete.includes(o.port)){
+    text += `\n⚠️ Data belum lengkap, silakan VALDAT ulang.`
+  }
+  return text
+}
+
+function valdatKeyboard(o){
+  return {
+    inline_keyboard:[
+      [
+        {text:'📝 VALDAT GPON', callback_data:`VALDAT_GPON|${o.nama}`},
+        {text:'📝 VALDAT SLOT', callback_data:`VALDAT_SLOT|${o.nama}`},
+        {text:'📝 VALDAT PORT', callback_data:`VALDAT_PORT|${o.nama}`}
+      ],
+      [
+        {text:'📋 VALDAT ISI PELANGGAN', callback_data:`VALDAT_ISI|${o.nama}`}
+      ]
+    ]
+  }
 }
 
 // ========= MENU =========
@@ -199,23 +224,6 @@ Nilai: ${p.value}`)
     userMode[chatId]='VALIDASI'
     bot.sendMessage(chatId,"Ketik nama ODP")
     return
-  }
-
-})
-
-// ========= MESSAGE =========
-bot.on('message', async msg=>{
-  if(!msg.text) return
-  const chatId = msg.chat.id
-  if(msg.text.startsWith('/')) return
-
-  if(userMode[chatId]==='VALIDASI'){
-    await loadSheet()
-
-    const odp = sheetData.find(o=>o.nama===msg.text)
-    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
-
-    bot.sendMessage(chatId, formatODP(odp))
   }
 
 })
