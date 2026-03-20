@@ -33,29 +33,16 @@ if (!rawAdmin) {
     .filter(x => !isNaN(x))
 }
 
-// ========= BOT INIT =========
-const bot = new TelegramBot(TOKEN, {
-  polling: false
-})
+// ========= BOT INIT (FIX 409) =========
+const bot = new TelegramBot(TOKEN, { polling: false })
 
-// 🔥 FIX 409 TOTAL
-async function startBot() {
-  try {
-    await bot.deleteWebHook()
-    console.log("✅ Webhook dihapus")
-
-    await bot.startPolling({
-      restart: true,
-      dropPendingUpdates: true
-    })
-
-    console.log("🚀 BOT ODP PREMIUM AKTIF")
-  } catch (err) {
-    console.log("START ERROR:", err.message)
-  }
+async function initBot() {
+  await bot.deleteWebHook({ drop_pending_updates: true })
+  await new Promise(r => setTimeout(r, 1500))
+  await bot.startPolling({ restart: true })
+  console.log("🚀 BOT ODP PREMIUM AKTIF")
 }
-
-startBot()
+initBot()
 
 bot.on("polling_error", (err) => {
   console.log("Polling error:", err.message)
@@ -76,13 +63,12 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
 
-// 🔥 FIX WAJIB
 const sheets = google.sheets({ version: 'v4', auth })
 
 // ========= STATUS =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
 
-// ========= LOAD SHEET =========
+// ========= LOAD =========
 async function loadSheet(){
   sheetData=[]
   const res = await axios.get(SHEET_URL)
@@ -135,15 +121,6 @@ ${o.isi || '-'}
 ━━━━━━━━━━━━━━`
 }
 
-function formatODPWithValdat(o){
-  const incomplete = ['#N/A', undefined, null]
-  let text = formatODP(o)
-  if(incomplete.includes(o.gpon) || incomplete.includes(o.slot) || incomplete.includes(o.port)){
-    text += `\n⚠️ Data belum lengkap, silakan VALDAT ulang.`
-  }
-  return text
-}
-
 function valdatKeyboard(o){
   return {
     inline_keyboard:[
@@ -181,7 +158,7 @@ Silakan pilih menu.`,
 bot.onText(/\/start/, msg=>{
   const chatId = msg.chat.id
   userMode[chatId] = null
-  bot.sendMessage(chatId,"✅ Bot siap!",{reply_markup:{remove_keyboard:true}})
+  bot.sendMessage(chatId,"✅ Bot siap!")
   showMenu(chatId)
 })
 
@@ -191,6 +168,21 @@ bot.on('callback_query', async q => {
   const chatId = q.message.chat.id
   const data = q.data
 
+  // ===== VALDAT CLICK (FIX UTAMA) =====
+  if(data.startsWith('VALDAT_')){
+    const [field,nama] = data.split('|')
+
+    userMode[chatId] = {
+      valdat:true,
+      field,
+      nama
+    }
+
+    bot.sendMessage(chatId,`Masukkan nilai ${field.replace('VALDAT_','')}`)
+    return
+  }
+
+  // ===== APPROVE =====
   if(data.startsWith('APPROVE_')){
     const id=data.split('_')[1]
     const p=pendingApproval[id]
@@ -239,13 +231,62 @@ bot.on('message', async msg=>{
   const chatId = msg.chat.id
   if(msg.text.startsWith('/')) return
 
-  if(userMode[chatId]==='VALIDASI'){
+  // ===== INPUT VALDAT =====
+  if(userMode[chatId]?.valdat){
+    const {field,nama}=userMode[chatId]
     await loadSheet()
 
-    const odp = sheetData.find(o=>o.nama===msg.text)
+    const odp = sheetData.find(o=>o.nama===nama)
     if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
 
-    bot.sendMessage(chatId, formatODPWithValdat(odp), {
+    const colMap={ GPON:5, SLOT:6, PORT:7, ISI:8 }
+    const col=colMap[field.replace('VALDAT_','')]
+
+    const id=Date.now()
+
+    pendingApproval[id]={
+      nama,
+      field,
+      value:msg.text,
+      col,
+      row:odp.row,
+      user:msg.from.username || msg.from.first_name,
+      userChatId:chatId
+    }
+
+    ADMIN_IDS.forEach(adminId=>{
+      bot.sendMessage(adminId,
+`📝 PERMINTAAN UPDATE ODP
+
+ODP: ${nama}
+Field: ${field.replace('VALDAT_','')}
+Nilai: ${msg.text}
+User: @${pendingApproval[id].user}`,
+{
+  reply_markup:{
+    inline_keyboard:[
+      [
+        {text:'✅ APPROVE',callback_data:`APPROVE_${id}`},
+        {text:'❌ REJECT',callback_data:`REJECT_${id}`}
+      ]
+    ]
+  }
+})
+    })
+
+    bot.sendMessage(chatId,"⏳ Menunggu approval admin...")
+    userMode[chatId]=null
+    return
+  }
+
+  // ===== SEARCH ODP =====
+  if(userMode[chatId]==='VALIDASI'){
+    await loadSheet()
+    const odp = sheetData.find(o=>o.nama===msg.text)
+
+    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+
+    bot.sendMessage(chatId, formatODP(odp), {
       reply_markup: valdatKeyboard(odp)
     })
   }
