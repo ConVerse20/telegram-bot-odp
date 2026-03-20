@@ -11,7 +11,7 @@ const SHEET_ID = process.env.SHEET_ID
 const KEY_FILE = './service-account.json'
 const RADAR_RADIUS = 50
 
-const ADMIN_IDS = (process.env.ADMIN_IDS || '167474430')
+const ADMIN_IDS = String(process.env.ADMIN_IDS || '167474430')
   .split(',')
   .map(x => Number(x.trim()))
 
