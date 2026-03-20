@@ -347,8 +347,10 @@ bot.on('message', async msg=>{
       userChatId:chatId
     }
 
-    ADMIN_IDS.forEach(adminId=>{
-      bot.sendMessage(adminId,
+    console.log('Kirim ke admin:', ADMIN_IDS)
+
+ADMIN_IDS.forEach(adminId=>{
+  bot.sendMessage(adminId,
 `📝 PERMINTAAN UPDATE ODP
 
 ODP: ${nama}
