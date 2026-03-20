@@ -194,7 +194,7 @@ bot.on('callback_query', async q => {
     if(!p) return
 
     try{
-      const colLetter=String.fromCharCode(64+p.col)
+      const colLetter = String.fromCharCode(64 + Number(p.col))
 
       await sheets.spreadsheets.values.update({
         spreadsheetId:SHEET_ID,
