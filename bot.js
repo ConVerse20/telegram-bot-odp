@@ -35,30 +35,38 @@ if (!rawAdmin) {
 
 // ========= BOT INIT =========
 const bot = new TelegramBot(TOKEN, {
-  polling: {
-    autoStart: false,
-    params: { timeout: 10 }
-  }
+  polling: false
 })
 
-// 🔥 FIX 409 WAJIB
-bot.deleteWebHook().then(() => {
-  console.log("✅ Webhook dihapus")
-  bot.startPolling()
-})
+// 🔥 FIX 409 TOTAL
+async function startBot() {
+  try {
+    await bot.deleteWebHook()
+    console.log("✅ Webhook dihapus")
+
+    await bot.startPolling({
+      restart: true,
+      dropPendingUpdates: true
+    })
+
+    console.log("🚀 BOT ODP PREMIUM AKTIF")
+  } catch (err) {
+    console.log("START ERROR:", err.message)
+  }
+}
+
+startBot()
 
 bot.on("polling_error", (err) => {
   console.log("Polling error:", err.message)
 })
-
-console.log("🚀 BOT ODP PREMIUM AKTIF")
 
 // ========= STATE =========
 let sheetData = []
 let userMode = {}
 let pendingApproval = {}
 
-// ========= GOOGLE AUTH (BASE64) =========
+// ========= GOOGLE AUTH =========
 const credentials = JSON.parse(
   Buffer.from(process.env.GOOGLE_CREDS_BASE64, 'base64').toString('utf-8')
 )
@@ -68,10 +76,10 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
 
-// 🔥 FIX PENTING (INI YANG KEMARIN ERROR)
+// 🔥 FIX WAJIB
 const sheets = google.sheets({ version: 'v4', auth })
 
-// ========= STATUS ICON =========
+// ========= STATUS =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
 
 // ========= LOAD SHEET =========
@@ -183,7 +191,6 @@ bot.on('callback_query', async q => {
   const chatId = q.message.chat.id
   const data = q.data
 
-  // ===== APPROVE =====
   if(data.startsWith('APPROVE_')){
     const id=data.split('_')[1]
     const p=pendingApproval[id]
@@ -219,11 +226,27 @@ Nilai: ${p.value}`)
     return
   }
 
-  // ===== VALIDASI =====
   if(data==='VALIDASI'){
     userMode[chatId]='VALIDASI'
     bot.sendMessage(chatId,"Ketik nama ODP")
     return
   }
+})
 
+// ========= MESSAGE =========
+bot.on('message', async msg=>{
+  if(!msg.text) return
+  const chatId = msg.chat.id
+  if(msg.text.startsWith('/')) return
+
+  if(userMode[chatId]==='VALIDASI'){
+    await loadSheet()
+
+    const odp = sheetData.find(o=>o.nama===msg.text)
+    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+
+    bot.sendMessage(chatId, formatODPWithValdat(odp), {
+      reply_markup: valdatKeyboard(odp)
+    })
+  }
 })
