@@ -17,10 +17,12 @@ let ADMIN_IDS = []
 
 if (!rawAdmin) {
   ADMIN_IDS = [167474430]
-} else if (typeof rawAdmin === 'string') {
-  ADMIN_IDS = rawAdmin.split(',').map(x => Number(x.trim()))
 } else {
-  ADMIN_IDS = [Number(rawAdmin)]
+  ADMIN_IDS = rawAdmin
+    .replace(/"/g, '') // hapus kutip
+    .split(',')
+    .map(x => Number(x.trim()))
+    .filter(x => !isNaN(x))
 }
 // ========= RESET TELEGRAM (FIX 409) =========
 (async () => {
