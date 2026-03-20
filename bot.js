@@ -1,4 +1,4 @@
-// ===== ANTI DOUBLE INSTANCE =====
+// ===== ANTI DOUBLE INSTANCE (RAILWAY SAFE) =====
 if (global.botRunning) {
   console.log("⚠️ Bot sudah jalan, skip instance baru")
   process.exit(0)
@@ -14,12 +14,12 @@ const csv = require('csv-parser')
 const { Readable } = require('stream')
 const { google } = require('googleapis')
 
-// ========= CONFIG (PAKAI ENV) =========
+// ========= CONFIG =========
 const TOKEN = process.env.BOT_TOKEN
 const SHEET_URL = process.env.ODP_SHEET
 const SHEET_ID = process.env.SHEET_ID
 
-// ========= ADMIN IDS FIX =========
+// ========= ADMIN IDS =========
 const rawAdmin = process.env.ADMIN_IDS
 let ADMIN_IDS = []
 
@@ -33,7 +33,7 @@ if (!rawAdmin) {
     .filter(x => !isNaN(x))
 }
 
-// ========= BOT INIT =========
+// ========= BOT INIT (ANTI 409 FIX) =========
 const bot = new TelegramBot(TOKEN, {
   polling: {
     autoStart: false,
@@ -41,7 +41,11 @@ const bot = new TelegramBot(TOKEN, {
   }
 })
 
-bot.startPolling()
+// 🔥 WAJIB: reset webhook + polling bersih
+bot.deleteWebHook().then(() => {
+  console.log("✅ Webhook dihapus")
+  bot.startPolling()
+})
 
 bot.on("polling_error", (err) => {
   console.log("Polling error:", err.message)
@@ -49,12 +53,7 @@ bot.on("polling_error", (err) => {
 
 console.log("🚀 BOT ODP PREMIUM AKTIF")
 
-// ========= STATE =========
-let sheetData = []
-let userMode = {}
-let pendingApproval = {}
-
-// ========= GOOGLE AUTH (FIX RAILWAY) =========
+// ========= GOOGLE AUTH (BASE64 FIX) =========
 const credentials = JSON.parse(
   Buffer.from(process.env.GOOGLE_CREDS_BASE64, 'base64').toString('utf-8')
 )
@@ -63,6 +62,14 @@ const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 })
+
+const sheets = google.sheets({ version: 'v4', auth })
+
+// ========= STATE =========
+let sheetData = []
+let userMode = {}
+let pendingApproval = {}
+
 // ========= STATUS ICON =========
 const STATUS_ICON = { RED:'🔴', YELLOW:'🟡', GREEN:'🟢', BLACK:'⚫' }
 
@@ -104,16 +111,6 @@ async function loadSheet(){
   })
 }
 
-// ========= DISTANCE =========
-function distance(lat1, lon1, lat2, lon2){
-  const R = 6371000
-  const toRad = d=>d*Math.PI/180
-  const dLat = toRad(lat2-lat1)
-  const dLon = toRad(lon2-lon1)
-  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2
-  return R*(2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)))
-}
-
 // ========= FORMAT =========
 function formatODP(o){
   return `━━━━━━━━━━━━━━
@@ -127,30 +124,6 @@ ${STATUS_ICON[o.status] || '⚪'} Status : ${o.status}
 📋 Isi Pelanggan :
 ${o.isi || '-'}
 ━━━━━━━━━━━━━━`
-}
-
-function formatODPWithValdat(o){
-  const incomplete = ['#N/A', undefined, null]
-  let text = formatODP(o)
-  if(incomplete.includes(o.gpon) || incomplete.includes(o.slot) || incomplete.includes(o.port)){
-    text += `\n⚠️ Data belum lengkap, silakan VALDAT ulang.`
-  }
-  return text
-}
-
-function valdatKeyboard(o){
-  return {
-    inline_keyboard:[
-      [
-        {text:'📝 VALDAT GPON', callback_data:`VALDAT_GPON|${o.nama}`},
-        {text:'📝 VALDAT SLOT', callback_data:`VALDAT_SLOT|${o.nama}`},
-        {text:'📝 VALDAT PORT', callback_data:`VALDAT_PORT|${o.nama}`}
-      ],
-      [
-        {text:'📋 VALDAT ISI PELANGGAN', callback_data:`VALDAT_ISI|${o.nama}`}
-      ]
-    ]
-  }
 }
 
 // ========= MENU =========
@@ -194,8 +167,6 @@ bot.on('callback_query', async q => {
     try{
       const colLetter = String.fromCharCode(64 + Number(p.col))
 
-      console.log("UPDATE:", `ODP!${colLetter}${p.row}`, p.value)
-
       await sheets.spreadsheets.values.update({
         spreadsheetId:SHEET_ID,
         range:`ODP!${colLetter}${p.row}`,
@@ -238,53 +209,13 @@ bot.on('message', async msg=>{
   const chatId = msg.chat.id
   if(msg.text.startsWith('/')) return
 
-  // ===== VALDAT =====
-  if(userMode[chatId]?.valdat){
-    const {field,nama}=userMode[chatId]
+  if(userMode[chatId]==='VALIDASI'){
     await loadSheet()
 
-    const odp = sheetData.find(o=>o.nama===nama)
+    const odp = sheetData.find(o=>o.nama===msg.text)
     if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
 
-    const colMap={ GPON:5, SLOT:6, PORT:7, ISI:8 }
-    const col=colMap[field.replace('VALDAT_','')]
-
-    const approvalId=Date.now()
-
-    pendingApproval[approvalId]={
-      nama,
-      field,
-      value:msg.text,
-      col,
-      row:odp.row,
-      user:msg.from.username || msg.from.first_name,
-      userChatId:chatId
-    }
-
-    ADMIN_IDS.forEach(adminId=>{
-      console.log("Kirim ke admin:", adminId)
-
-      bot.sendMessage(adminId,
-`📝 PERMINTAAN UPDATE ODP
-
-ODP: ${nama}
-Field: ${field.replace('VALDAT_','')}
-Nilai: ${msg.text}
-User: @${pendingApproval[approvalId].user}`,
-{
-  reply_markup:{
-    inline_keyboard:[
-      [
-        {text:'✅ APPROVE',callback_data:`APPROVE_${approvalId}`},
-        {text:'❌ REJECT',callback_data:`REJECT_${approvalId}`}
-      ]
-    ]
+    bot.sendMessage(chatId, formatODP(odp))
   }
-})
-    })
 
-    bot.sendMessage(chatId,"⏳ Menunggu approval admin...")
-    userMode[chatId]=null
-    return
-  }
 })
