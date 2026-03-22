@@ -289,8 +289,53 @@ bot.on('message', async msg=>{
 
     await loadSheet()
 
-    let nearest = null
-    let minDist = Infinity
+    // ===== SHARE LOCATION (RADIUS 50M) =====
+if(msg.location){
+  const userLat = msg.location.latitude
+  const userLon = msg.location.longitude
+
+  await loadSheet()
+
+  const RADIUS = 0.05 // km = 50 meter
+  let found = []
+
+  function distance(a,b,c,d){
+    const R = 6371
+    const dLat = (c-a)*Math.PI/180
+    const dLon = (d-b)*Math.PI/180
+    const x = Math.sin(dLat/2)**2 +
+      Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
+      Math.sin(dLon/2)**2
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
+  }
+
+  sheetData.forEach(o=>{
+    const dist = distance(userLat,userLon,o.lat,o.lon)
+    if(dist <= RADIUS){
+      found.push({...o, dist})
+    }
+  })
+
+  if(found.length === 0){
+    bot.sendMessage(chatId,"❌ Tidak ada ODP dalam radius 50 meter")
+    return
+  }
+
+  // urutkan dari terdekat
+  found.sort((a,b)=>a.dist - b.dist)
+
+  // tampilkan semua ODP dalam radius
+  for(const o of found){
+    bot.sendMessage(chatId, formatODP(o), {
+      reply_markup: valdatKeyboard(o)
+    })
+
+    bot.sendLocation(chatId, o.lat, o.lon)
+  }
+
+  userMode[chatId]=null
+  return
+}
 
     function distance(a,b,c,d){
       const R = 6371
