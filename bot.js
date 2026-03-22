@@ -355,14 +355,21 @@ User: @${pendingApproval[id].user}`,
   }
 
   // ===== SEARCH ODP =====
-  if(userMode[chatId]==='VALIDASI'){
-    await loadSheet()
-    const odp = sheetData.find(o=>o.nama===msg.text)
+if(userMode[chatId]==='VALIDASI'){
+  await loadSheet()
+  const odp = sheetData.find(o=>o.nama===msg.text)
 
-    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+  if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
 
-    bot.sendMessage(chatId, formatODP(odp), {
-      reply_markup: valdatKeyboard(odp)
-    })
-  }
-})
+  // kirim info
+  bot.sendMessage(chatId, formatODP(odp), {
+    reply_markup: valdatKeyboard(odp)
+  })
+
+  // 🔥 TAMBAHAN WAJIB (INI YANG BIKIN MUNCUL MAP)
+  const mapsUrl = `https://www.google.com/maps?q=${odp.lat},${odp.lon}`
+  bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+
+  // optional pin
+  bot.sendLocation(chatId, odp.lat, odp.lon)
+}
