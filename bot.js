@@ -294,7 +294,15 @@ bot.on('message', async msg=>{
       reply_markup: valdatKeyboard(nearest)
     })
 
-    bot.sendLocation(chatId, nearest.lat, nearest.lon)
+    // kirim info dulu
+bot.sendMessage(chatId, formatODP(nearest), {
+  reply_markup: valdatKeyboard(nearest)
+})
+
+// kirim map + preview besar (INI YANG KAMU MAU)
+const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
+
+bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
 
     userMode[chatId]=null
     return
