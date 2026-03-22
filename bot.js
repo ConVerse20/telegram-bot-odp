@@ -257,56 +257,54 @@ bot.on('message', async msg=>{
   const chatId = msg.chat.id
   if(msg.text && msg.text.startsWith('/')) return
 
-  // ===== SHARE LOCATION (FIX) =====
-  if(msg.location && userMode[chatId]==='RADAR'){
-    const userLat = msg.location.latitude
-    const userLon = msg.location.longitude
+  // ===== SHARE LOCATION =====
+if(msg.location){
+  const userLat = msg.location.latitude
+  const userLon = msg.location.longitude
 
-    await loadSheet()
+  await loadSheet()
 
-    let nearest = null
-    let minDist = Infinity
+  let nearest = null
+  let minDist = Infinity
 
-    function distance(a,b,c,d){
-      const R = 6371
-      const dLat = (c-a)*Math.PI/180
-      const dLon = (d-b)*Math.PI/180
-      const x = Math.sin(dLat/2)**2 +
-        Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
-        Math.sin(dLon/2)**2
-      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
+  function distance(a,b,c,d){
+    const R = 6371
+    const dLat = (c-a)*Math.PI/180
+    const dLon = (d-b)*Math.PI/180
+    const x = Math.sin(dLat/2)**2 +
+      Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
+      Math.sin(dLon/2)**2
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
+  }
+
+  sheetData.forEach(o=>{
+    const dist = distance(userLat,userLon,o.lat,o.lon)
+    if(dist < minDist){
+      minDist = dist
+      nearest = o
     }
+  })
 
-    sheetData.forEach(o=>{
-      const dist = distance(userLat,userLon,o.lat,o.lon)
-      if(dist < minDist){
-        minDist = dist
-        nearest = o
-      }
-    })
-
-    if(!nearest){
-      bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
-      return
-    }
-
-    bot.sendMessage(chatId, formatODP(nearest), {
-      reply_markup: valdatKeyboard(nearest)
-    })
-
-    // kirim info dulu
-bot.sendMessage(chatId, formatODP(nearest), {
-  reply_markup: valdatKeyboard(nearest)
-})
-
-// kirim map + preview besar (INI YANG KAMU MAU)
-const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
-
-bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
-
-    userMode[chatId]=null
+  if(!nearest){
+    bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
     return
   }
+
+  // kirim info ODP
+  bot.sendMessage(chatId, formatODP(nearest), {
+    reply_markup: valdatKeyboard(nearest)
+  })
+
+  // 🔥 MAP BESAR (WAJIB)
+  const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
+  bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+
+  // optional pin
+  bot.sendLocation(chatId, nearest.lat, nearest.lon)
+
+  userMode[chatId]=null
+  return
+}
 
   // ===== INPUT VALDAT =====
   if(userMode[chatId]?.valdat){
