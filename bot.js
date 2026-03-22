@@ -319,8 +319,7 @@ bot.on('message', async msg=>{
       reply_markup: valdatKeyboard(nearest)
     })
 
-    const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
-    bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+  
     bot.sendLocation(chatId, nearest.lat, nearest.lon)
 
     userMode[chatId]=null
@@ -386,8 +385,7 @@ User: @${pendingApproval[id].user}`,
       reply_markup: valdatKeyboard(odp)
     })
 
-    const mapsUrl = `https://www.google.com/maps?q=${odp.lat},${odp.lon}`
-    bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+    
     bot.sendLocation(chatId, odp.lat, odp.lon)
   }
 })
