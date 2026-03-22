@@ -33,7 +33,7 @@ if (!rawAdmin) {
     .filter(x => !isNaN(x))
 }
 
-// ========= BOT INIT (FIX 409) =========
+// ========= BOT INIT =========
 const bot = new TelegramBot(TOKEN, { polling: false })
 
 async function initBot() {
@@ -168,7 +168,7 @@ bot.on('callback_query', async q => {
   const chatId = q.message.chat.id
   const data = q.data
 
-  // ===== VALDAT CLICK (FIX UTAMA) =====
+  // ===== VALDAT CLICK =====
   if(data.startsWith('VALDAT_')){
     const [field,nama] = data.split('|')
 
@@ -218,37 +218,87 @@ Nilai: ${p.value}`)
     return
   }
 
-  if(data==='VALIDASI'){
-    userMode[chatId]='VALIDASI'
-    bot.sendMessage(chatId,"Ketik nama ODP")
-    return
-  }
-})
+  // ===== REJECT (FIX) =====
+  if(data.startsWith('REJECT_')){
+    const id = data.split('_')[1]
+    const p = pendingApproval[id]
+    if(!p) return
 
-// ===== REJECT =====
-if(data.startsWith('REJECT_')){
-  const id = data.split('_')[1]
-  const p = pendingApproval[id]
-  if(!p) return
+    bot.sendMessage(chatId,"❌ Update ditolak")
 
-  bot.sendMessage(chatId,"❌ Update ditolak")
-
-  bot.sendMessage(p.userChatId,
+    bot.sendMessage(p.userChatId,
 `❌ VALDAT DITOLAK ADMIN
 
 ODP: ${p.nama}
 Field: ${p.field.replace('VALDAT_','')}
 Nilai: ${p.value}`)
 
-  delete pendingApproval[id]
-  return
-}
+    delete pendingApproval[id]
+    return
+  }
+
+  if(data==='VALIDASI'){
+    userMode[chatId]='VALIDASI'
+    bot.sendMessage(chatId,"Ketik nama ODP")
+    return
+  }
+
+  // ===== RADAR (FIX SHARELOK) =====
+  if(data==='RADAR'){
+    userMode[chatId]='RADAR'
+    bot.sendMessage(chatId,"📍 Kirim lokasi kamu (share location)")
+    return
+  }
+})
 
 // ========= MESSAGE =========
 bot.on('message', async msg=>{
-  if(!msg.text) return
+  if(!msg.text && !msg.location) return
   const chatId = msg.chat.id
-  if(msg.text.startsWith('/')) return
+  if(msg.text && msg.text.startsWith('/')) return
+
+  // ===== SHARE LOCATION (FIX) =====
+  if(msg.location && userMode[chatId]==='RADAR'){
+    const userLat = msg.location.latitude
+    const userLon = msg.location.longitude
+
+    await loadSheet()
+
+    let nearest = null
+    let minDist = Infinity
+
+    function distance(a,b,c,d){
+      const R = 6371
+      const dLat = (c-a)*Math.PI/180
+      const dLon = (d-b)*Math.PI/180
+      const x = Math.sin(dLat/2)**2 +
+        Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
+        Math.sin(dLon/2)**2
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
+    }
+
+    sheetData.forEach(o=>{
+      const dist = distance(userLat,userLon,o.lat,o.lon)
+      if(dist < minDist){
+        minDist = dist
+        nearest = o
+      }
+    })
+
+    if(!nearest){
+      bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+      return
+    }
+
+    bot.sendMessage(chatId, formatODP(nearest), {
+      reply_markup: valdatKeyboard(nearest)
+    })
+
+    bot.sendLocation(chatId, nearest.lat, nearest.lon)
+
+    userMode[chatId]=null
+    return
+  }
 
   // ===== INPUT VALDAT =====
   if(userMode[chatId]?.valdat){
