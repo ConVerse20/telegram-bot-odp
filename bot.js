@@ -90,13 +90,39 @@ async function loadSheet(){
 
       if(!nama || !share){ rowNumber++; return }
 
-      const coord=share.match(/-?\d+\.\d+/g)
-      if(!coord){ rowNumber++; return }
+      // ===== FIX PARSING KOORDINAT (ANTI ERROR) =====
+      if(share.includes('#N/A') || share.trim()==='' || share==='.,'){
+        rowNumber++
+        return
+      }
+
+      let lat = null
+      let lon = null
+
+      if(share.includes(',')){
+        const parts = share.split(',')
+        lat = parseFloat(parts[0])
+        lon = parseFloat(parts[1])
+      }
+
+      if((!lat || !lon) && share){
+        const coord = share.match(/-?\d+\.\d+/g)
+        if(coord && coord.length >= 2){
+          lat = parseFloat(coord[0])
+          lon = parseFloat(coord[1])
+        }
+      }
+
+      if(!lat || !lon){
+        console.log("❌ KOORDINAT INVALID:", share)
+        rowNumber++
+        return
+      }
 
       sheetData.push({
         nama,status,gpon,slot,port,isi,
-        lat:parseFloat(coord[0]),
-        lon:parseFloat(coord[1]),
+        lat,
+        lon,
         row:rowNumber
       })
 
@@ -218,7 +244,7 @@ Nilai: ${p.value}`)
     return
   }
 
-  // ===== REJECT (FIX) =====
+  // ===== REJECT =====
   if(data.startsWith('REJECT_')){
     const id = data.split('_')[1]
     const p = pendingApproval[id]
@@ -243,10 +269,9 @@ Nilai: ${p.value}`)
     return
   }
 
-  // ===== RADAR (FIX SHARELOK) =====
   if(data==='RADAR'){
     userMode[chatId]='RADAR'
-    bot.sendMessage(chatId,"📍 Kirim lokasi kamu (share location)")
+    bot.sendMessage(chatId,"📍 Kirim lokasi kamu")
     return
   }
 })
@@ -258,53 +283,49 @@ bot.on('message', async msg=>{
   if(msg.text && msg.text.startsWith('/')) return
 
   // ===== SHARE LOCATION =====
-if(msg.location){
-  const userLat = msg.location.latitude
-  const userLon = msg.location.longitude
+  if(msg.location){
+    const userLat = msg.location.latitude
+    const userLon = msg.location.longitude
 
-  await loadSheet()
+    await loadSheet()
 
-  let nearest = null
-  let minDist = Infinity
+    let nearest = null
+    let minDist = Infinity
 
-  function distance(a,b,c,d){
-    const R = 6371
-    const dLat = (c-a)*Math.PI/180
-    const dLon = (d-b)*Math.PI/180
-    const x = Math.sin(dLat/2)**2 +
-      Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
-      Math.sin(dLon/2)**2
-    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
-  }
-
-  sheetData.forEach(o=>{
-    const dist = distance(userLat,userLon,o.lat,o.lon)
-    if(dist < minDist){
-      minDist = dist
-      nearest = o
+    function distance(a,b,c,d){
+      const R = 6371
+      const dLat = (c-a)*Math.PI/180
+      const dLon = (d-b)*Math.PI/180
+      const x = Math.sin(dLat/2)**2 +
+        Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
+        Math.sin(dLon/2)**2
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x))
     }
-  })
 
-  if(!nearest){
-    bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+    sheetData.forEach(o=>{
+      const dist = distance(userLat,userLon,o.lat,o.lon)
+      if(dist < minDist){
+        minDist = dist
+        nearest = o
+      }
+    })
+
+    if(!nearest){
+      bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+      return
+    }
+
+    bot.sendMessage(chatId, formatODP(nearest), {
+      reply_markup: valdatKeyboard(nearest)
+    })
+
+    const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
+    bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+    bot.sendLocation(chatId, nearest.lat, nearest.lon)
+
+    userMode[chatId]=null
     return
   }
-
-  // kirim info ODP
-  bot.sendMessage(chatId, formatODP(nearest), {
-    reply_markup: valdatKeyboard(nearest)
-  })
-
-  // 🔥 MAP BESAR (WAJIB)
-  const mapsUrl = `https://www.google.com/maps?q=${nearest.lat},${nearest.lon}`
-  bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
-
-  // optional pin
-  bot.sendLocation(chatId, nearest.lat, nearest.lon)
-
-  userMode[chatId]=null
-  return
-}
 
   // ===== INPUT VALDAT =====
   if(userMode[chatId]?.valdat){
@@ -355,21 +376,18 @@ User: @${pendingApproval[id].user}`,
   }
 
   // ===== SEARCH ODP =====
-if(userMode[chatId]==='VALIDASI'){
-  await loadSheet()
-  const odp = sheetData.find(o=>o.nama===msg.text)
+  if(userMode[chatId]==='VALIDASI'){
+    await loadSheet()
+    const odp = sheetData.find(o=>o.nama===msg.text)
 
-  if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
+    if(!odp) return bot.sendMessage(chatId,"❌ ODP tidak ditemukan")
 
-  // kirim info
-  bot.sendMessage(chatId, formatODP(odp), {
-    reply_markup: valdatKeyboard(odp)
-  })
+    bot.sendMessage(chatId, formatODP(odp), {
+      reply_markup: valdatKeyboard(odp)
+    })
 
-  // 🔥 TAMBAHAN WAJIB (INI YANG BIKIN MUNCUL MAP)
-  const mapsUrl = `https://www.google.com/maps?q=${odp.lat},${odp.lon}`
-  bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
-
-  // optional pin
-  bot.sendLocation(chatId, odp.lat, odp.lon)
-}
+    const mapsUrl = `https://www.google.com/maps?q=${odp.lat},${odp.lon}`
+    bot.sendMessage(chatId, `📍 Lokasi ODP:\n${mapsUrl}`)
+    bot.sendLocation(chatId, odp.lat, odp.lon)
+  }
+})
